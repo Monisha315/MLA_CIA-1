@@ -1,0 +1,164 @@
+#Import data
+pr_data<-read.csv("C:\\Users\\MB Monisha\\OneDrive\\garments_worker-productivity.csv")
+#Get the required packages
+library(psych) #used for visualization
+library(DataExplorer)
+library(car)
+library(lmtest)
+library(ModelMetrics)
+library(MASS) 
+#Perform EDA
+#understand data structure
+str(pr_data)
+
+summary(pr_data)
+
+#Missingness analysis
+is.na(pr_data)
+plot_missing(pr_data)
+
+# View columns with missing values
+sapply(pr_data, function(x) sum(is.na(x)))
+
+# Mean imputation for the "wip" variable
+pr_data$wip[is.na(pr_data$wip)] <- mean(pr_data$wip, na.rm = TRUE)
+
+# Verify no missing values remain
+sum(is.na(pr_data$wip))
+
+#Boxplot to visualize outliers
+boxplot(pr_data$actual_productivity, main="Boxplot for Actual Productivity", ylab="Actual Productivity")
+
+#Perform EDA
+#Understand distributions and correlations
+pairs.panels(pr_data)
+plot_histogram(pr_data)
+plot_density(pr_data)
+plot_correlation(pr_data)
+
+#Simple linear regression
+pr_lm<-lm(actual_productivity~targeted_productivity,data=pr_data)
+summary(pr_lm)
+pr_lm1<-lm(actual_productivity~targeted_productivity+I(targeted_productivity^2),data=pr_data)
+summary(pr_lm1)
+pr_lm1<-lm(actual_productivity~targeted_productivity+I(targeted_productivity^3),data=pr_data)
+summary(pr_lm1)
+
+
+#Multi-linear regression
+lm_full <- lm(actual_productivity ~ quarter + department + day +
+                targeted_productivity + smv + wip + over_time + incentive + 
+                no_of_workers, data = pr_training)
+summary(pr_lm_full)
+
+pr_lm_pred <- predict(pr_lm_full, newdata = pr_testing)
+summary(le_lm_pred)
+
+# Select the best features using stepwise selection
+pr_step <- stepAIC(pr_lm_full, direction = "backward")
+
+# Build the reduced model based on selected features
+pr_lm_red <- lm(actual_productivity ~ targeted_productivity + smv + over_time + incentive + no_of_workers, data = pr_training)
+summary(pr_lm_red)
+
+
+# Check for multi-collinearity
+vif(pr_lm_red)
+
+# Autocorrelation of residuals
+dwtest(pr_lm_red)
+
+# Component residual plots
+crPlots(pr_lm_red)
+
+# Non-constant variance
+ncvTest(pr_lm_red)
+
+# Use model for predictions
+pr_lm_pred <- predict(pr_lm_red, newdata = pr_testing)
+newtest_pred <- cbind(pr_testing, pr_lm_pred)
+head(newtest_pred)
+
+# Evaluate model performance
+mse(pr_testing$actual_productivity, pr_lm_pred)
+
+#Ridge regression
+# Load necessary libraries
+library(glmnet)
+library(caret)
+
+# Data Preprocessing
+# Convert categorical variables to factors
+pr_data$quarter <- as.factor(pr_data$quarter)
+pr_data$department <- as.factor(pr_data$department)
+pr_data$day <- as.factor(pr_data$day)
+pr_data$team <- as.factor(pr_data$team)
+
+# Create the model matrix (including dummy variables for categorical variables)
+X <- model.matrix(actual_productivity ~ . -1, data = pr_data) 
+
+# Separate the target variable
+Y <- pr_data$actual_productivity
+
+# Define the lambda sequence
+lambda <- 10^seq(10, -2, length = 100)
+
+# Split the data into training and validation sets
+set.seed(567)
+part <- sample(2, nrow(X), replace = TRUE, prob = c(0.7, 0.3))
+X_train <- X[part == 1, ]
+X_cv <- X[part == 2, ]
+Y_train <- Y[part == 1]
+Y_cv <- Y[part == 2]
+
+# Perform Ridge regression
+ridge_reg <- glmnet(X_train, Y_train, alpha = 0, lambda = lambda)
+summary(ridge_reg)
+
+# Find the best lambda via cross-validation
+ridge_reg1 <- cv.glmnet(X_train, Y_train, alpha = 0)
+bestlam_ridge <- ridge_reg1$lambda.min
+print(bestlam_ridge)
+
+# Predict on the validation set
+ridge.pred <- predict(ridge_reg, s = bestlam_ridge, newx = X_cv)
+
+# Calculate mean squared error
+mse_ridge <- mean((Y_cv - ridge.pred)^2)
+print(paste("Mean Squared Error (Ridge):", mse_ridge))
+
+# Calculate R2 value
+sst_ridge <- sum((Y_cv - mean(Y_cv))^2)
+sse_ridge <- sum((Y_cv - ridge.pred)^2)
+r2_ridge <- 1 - (sse_ridge / sst_ridge)
+print(paste("R² (Ridge):", r2_ridge))
+
+# Get the Ridge regression coefficients
+ridge.coef <- predict(ridge_reg, type = "coefficients", s = bestlam_ridge)
+print("Ridge Coefficients:")
+print(ridge.coef)
+
+# Perform Lasso regression
+lasso_reg <- glmnet(X_train, Y_train, alpha = 1, lambda = lambda)
+
+# Find the best lambda via cross-validation
+lasso_reg1 <- cv.glmnet(X_train, Y_train, alpha = 1)
+bestlam_lasso <- lasso_reg1$lambda.min
+
+# Predict on the validation set
+lasso.pred <- predict(lasso_reg, s = bestlam_lasso, newx = X_cv)
+
+# Calculate mean squared error
+mse_lasso <- mean((Y_cv - lasso.pred)^2)
+print(paste("Mean Squared Error (Lasso):", mse_lasso))
+
+# Calculate R2 value
+sst_lasso <- sum((Y_cv - mean(Y_cv))^2)
+sse_lasso <- sum((Y_cv - lasso.pred)^2)
+r2_lasso <- 1 - (sse_lasso / sst_lasso)
+print(paste("R² (Lasso):", r2_lasso))
+
+# Get the Lasso regression coefficients
+lasso.coef <- predict(lasso_reg, type = "coefficients", s = bestlam_lasso)
+print("Lasso Coefficients:")
+print(lasso.coef)
